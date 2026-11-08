@@ -1,25 +1,18 @@
-# Runtime and documentation
+# Runtime, Platform Constraints & Documentation
 
-The skill bundles `assets/syntetic_core-0.1.0-py3-none-any.whl` and
-`assets/requirements.lock`. It does not bundle credentials, browser executables,
-profile data, or a virtual environment.
+The skill bundles `assets/syntetic_core-0.1.0-py3-none-any.whl` and `assets/requirements.lock` for self-contained execution without an active project checkout.
 
-`scripts/runtime.py info` resolves in this order:
+`scripts/runtime.py info` resolves in this priority:
+1. Explicit `SYNTETIC_CORE_HOME` environment variable.
+2. `runtime.json` created by the skill installer pointing to this project checkout.
+3. An enclosing Syntetic Core checkout directory.
+4. The bootstrapped skill runtime in `~/.cache/syntetic-core/skill-runtime`.
 
-1. Explicit `SYNTETIC_CORE_HOME` project path; invalid explicit configuration fails.
-2. `runtime.json` written by the skill installer, when that checkout still exists.
-3. An enclosing Syntetic Core source checkout.
-4. The isolated skill runtime created by `setup` under the user's cache directory.
+---
 
-An available project needs its own `.venv`. If the checkout/environment is missing,
-`setup` can install the bundled wheel instead. The helper never downloads dependencies
-or starts a browser merely to discover a runtime. `python` and `cli` subcommands
-forward arguments without a shell, preserve the working directory, and remove
-ambient PYTHONPATH/PYTHONHOME from the child to avoid cross-project imports.
+## Setup & Preparation
 
-## Setup
-
-```text
+```bash
 python scripts/runtime.py info
 python scripts/runtime.py setup
 python scripts/runtime.py cli prepare --engine chromium
@@ -27,40 +20,27 @@ python scripts/runtime.py cli doctor
 python scripts/runtime.py python /absolute/path/to/task.py
 ```
 
-`setup --venv /absolute/path` chooses a managed environment explicitly; set
-`SYNTETIC_CORE_SKILL_RUNTIME` to that path for subsequent commands. The default
-is `~/.cache/syntetic-core/skill-runtime`. `SYNTETIC_CORE_SKILL_RUNTIME` can select
-an existing managed environment. A configured project is preferred over this cache.
-Preparation requires Python 3.12+ and dependency/browser downloads; it is an explicit
-operation. It does not start a model session or call an IP provider.
+Preparation installs Playwright Chromium and applies the essential **Worker-target ownership patch** (Playwright 1.62.0), which prevents CDP deadlocks and automation detection flags.
 
-## Platform constraints
+---
 
-- Playwright is pinned to 1.62.0 and its checked Worker-target ownership patch.
-- Windows Chromium is independently tested in the standalone project.
-- Camoufox requires the separately installed pinned native build/model data. With
-  a source checkout, use `tools/setup_browser.py` and set `camoufox_install_path`.
-- iOS/WebKit needs Linux/macOS and verified native media support. It is blocked on
-  Windows. Linux ARM64 needs compatible binaries and explicit experimental opt-in.
-- Linux system libraries may require `python -m playwright install --with-deps chromium`
-  through the resolved interpreter, followed by driver preparation.
-- Physical hardware, complete OS behavior, real GPU limits, and all font metrics
-  are not reproduced by JavaScript. Sensors and media APIs depend on native support,
-  permissions, and secure contexts.
-- The package does not provide the original cluster's cgroups/supervisor. Concurrency
-  and isolation belong to the calling application/executor.
+## Anti-Detect Platform & Stealth Constraints
 
-## Read only what the task needs
+- **Chromium:** Uses Playwright 1.62.0 with driver patch and recursive CDP worker interception (handles DedicatedWorkers, SharedWorkers, ServiceWorkers, and NestedWorkers).
+- **Camoufox:** Hardened Firefox build with low-level C++ engine protection against Canvas/WebGL/Audio fingerprinting. Requires `camoufox_install_path` or `tools/setup_browser.py`.
+- **WebKit:** Emulates iOS and Safari layout/JS behavior. Operates on Linux and macOS; blocked on Windows.
+- **Native Browser TLS:** Traffic routed via SOCKS5 TargetProxy uses genuine browser TLS handshakes (real JA3/JA4 signatures), bypassing TLS-level bot mitigation.
+- **Hardware Limitations:** Physical CPU instruction sets and GPU hardware capabilities remain host properties. Avoid claiming ARM64 on x86-64 when running benchmarks that test machine instructions.
 
-When `info` reports a source checkout, read its English documentation:
+---
 
-- `README.md`: first use and available examples.
-- `docs/USAGE.md`: lifecycle, timeouts, persistence, fresh profiles.
-- `docs/EMULATION.md`: exact data groups and document/Worker boundaries.
-- `docs/PROXIES.md`: provider API mapping, IP confirmation, shared channels.
-- `docs/INSTALLATION.md`: Camoufox/WebKit/ARM64 setup and launch flags.
-- `docs/TROUBLESHOOTING.md`: runtime, identity, lock, and resource failures.
-- `VERIFICATION.md`: measured coverage and remaining platform/provider gaps.
+## Project Documentation Index
 
-For a wheel-only runtime, use [workflows.md](workflows.md), inspect the installed
-public API as needed, and obtain the project's source distribution for full docs.
+- `README.md` / `docs/ru/README.md`: Overview, quickstart, and features.
+- `docs/ARCHITECTURE.md` / `docs/ru/ARCHITECTURE.md`: Pipeline, CDP worker control, and storage layout.
+- `docs/EMULATION.md` / `docs/ru/EMULATION.md`: Digital fingerprint spoofing details (Canvas, WebGL, Audio, Client Hints, Fonts).
+- `docs/USAGE.md` / `docs/ru/USAGE.md`: Full API reference, settings, and behavioral helpers (`session.behavior`).
+- `docs/PROXIES.md` / `docs/ru/PROXIES.md`: Mobile proxies, modem locking, and IP rotation.
+- `docs/EXTRACTION.md` / `docs/ru/EXTRACTION.md`: Provenance and extraction from the production ПФ system.
+- `docs/INSTALLATION.md` / `docs/ru/INSTALLATION.md`: Environment setup and Camoufox / WebKit flags.
+- `docs/TROUBLESHOOTING.md` / `docs/ru/TROUBLESHOOTING.md`: Common errors, locks, and recovery steps.

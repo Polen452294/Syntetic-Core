@@ -1,10 +1,8 @@
-# Workflow examples
+# Anti-Detect Workflow Examples
 
-## Persistent browser parsing
+## 1. Undetected Persistent Browser Session & Automation
 
-Run with the interpreter reported by `scripts/runtime.py info` or through its
-`python` subcommand. Substitute the user's target and output requirements; do not
-visit demonstration URLs merely because they appear in this reference.
+Run with the interpreter reported by `scripts/runtime.py info` or via `python scripts/runtime.py python task.py`.
 
 ```python
 import asyncio
@@ -14,89 +12,107 @@ from syntetic_core import CoreSettings, SynteticCore
 
 
 async def main():
+    # Authorize target domains and required CDN/API hosts
     core = SynteticCore(
         Path(".syntetic-core/profiles").resolve(),
-        settings=CoreSettings(allowed_target_hosts=["example.com"]),
+        settings=CoreSettings(
+            allowed_target_hosts=["example.com", "static.example.com"],
+            browser_headless=False,
+        ),
     )
-    try:
-        core.load_profile("catalog")
-    except FileNotFoundError:
-        await core.create_profile("catalog", family="desktop")
 
-    async with core.session("catalog") as session:
+    # Load existing profile to reuse cookies & session history, or create a new one
+    try:
+        core.load_profile("stealth-user")
+    except FileNotFoundError:
+        # Generates coherent hardware recipe (GPU, CPU, Client Hints, Canvas/Audio seeds)
+        await core.create_profile("stealth-user", family="desktop", backend="playwright")
+
+    # Launch browser with CDP worker interception, native code proxying, and anti-detect layers
+    async with core.session("stealth-user") as session:
+        # goto() verifies network authorization, DOM readiness, and absence of CDP leaks
         response = await session.goto("https://example.com")
         if response is None or response.status >= 400:
-            raise RuntimeError("Target navigation failed")
-        await session.page.locator("body").wait_for(state="visible")
-        records = await session.page.locator("a[href]").evaluate_all(
-            "nodes => nodes.map(a => ({text:a.textContent.trim(),url:a.href}))"
+            raise RuntimeError(f"Navigation failed with status: {response.status if response else 'None'}")
+
+        # Human-like interaction via session.behavior (defeats behavioral analysis / ПФ)
+        # 1. Natural mouse movement along a Bezier curve to focus input
+        await session.behavior.click_element("input[name='search']")
+        
+        # 2. Human typing with variable delays and simulated typo corrections
+        await session.behavior.type_text("input[name='search']", "anti-detect automation")
+        
+        # 3. Inertial scroll with reading dwell time
+        await session.behavior.scroll_smooth(delta_y=400)
+        
+        # 4. Emulate on-page presence
+        await session.maintain_presence(seconds=3.0)
+
+        # Standard Playwright DOM extraction
+        items = await session.page.locator(".catalog-item").evaluate_all(
+            "nodes => nodes.map(n => ({title: n.querySelector('h2')?.textContent.trim()}))"
         )
-    Path("records.json").write_text(
-        json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+
+    # Persist extracted results (cookies and browser cache remain saved in profile storage)
+    Path("results.json").write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 asyncio.run(main())
 ```
 
-For a local fixture, authorize its host in both `allowed_target_hosts` and
-`trusted_local_target_hosts`. Allow exact CDN/resource/redirect hosts as required.
-Resource filtering is opt-in and can change rendering or break page behavior.
+---
 
-## Device selection
+## 2. Coherent Device Presets & Stealth Engines
 
 ```python
-await core.create_profile("android", family="android", backend="playwright")
-await core.create_profile("desktop-firefox", family="desktop", backend="camoufox")
-# Only an eligible Linux/macOS host with real WebKit checks:
-await core.create_profile("iphone", family="ios", backend="playwright")
+# Android Mobile (Samsung Galaxy, Google Pixel with 5-point multitouch & CDP sensors)
+await core.create_profile("android-user", family="android", backend="playwright")
+
+# Camoufox (Hardened Firefox with low-level C++ fingerprint defenses)
+await core.create_profile("firefox-stealth", family="desktop", backend="camoufox")
+
+# iOS / iPadOS WebKit (Linux/macOS only):
+await core.create_profile("ios-safari", family="ios", backend="playwright")
 ```
 
-An unavailable engine is a compatibility error. Capability discovery performs real
-local checks on first use and may take minutes. Do not fake manifests. Profiles
-default to persistent reuse; `fresh=True` is a single-use new/cold condition and
-requires `base_url` when opening its session.
+Every profile enforces **device coherence**: the GPU model, screen geometry, DPR, CPU cores, RAM, and Client Hints architecture are tightly coupled so anti-bot heuristic systems never find conflicting parameters.
 
-Use `asyncio.Semaphore` and separate profile IDs for parallel tasks. Never open the
-same profile concurrently or retry side-effecting actions after an uncertain result
-without application-specific handling. `maintain_presence()` is optional UX activity,
-not a requirement for scraping.
+---
 
-## Provider-controlled IP rotation
+## 3. Mobile Proxies & Verified IP Rotation
 
 ```python
 import os
 from pydantic import SecretStr
 from syntetic_core import CoreSettings, HttpRotationProvider, ProxyConfig, SynteticCore
 
+# Configure mobile proxy with modem serialization channel
 proxy = ProxyConfig(
-    id="mobile-1",
+    id="mobile-modem-1",
     server=os.environ["PROXY_SERVER"],
     username=SecretStr(os.environ["PROXY_USERNAME"]),
     password=SecretStr(os.environ["PROXY_PASSWORD"]),
     kind="mobile",
 )
+
 core = SynteticCore(
     "/absolute/task/profiles",
     settings=CoreSettings(
         proxies=[proxy],
-        proxy_required=True,
+        proxy_required=True,  # Disallows direct connections to avoid real IP leaks
         allowed_target_hosts=["example.com", "api.ipify.org"],
     ),
+    proxy_channels={"mobile-modem-1": "modem-channel-A"},
 )
+
+# HTTP rotation provider based on your mobile proxy provider's API
 provider = HttpRotationProvider(
     url=SecretStr(os.environ["ROTATION_API_URL"]),
     method="POST",
     headers={"Authorization": SecretStr(os.environ["ROTATION_AUTHORIZATION"])},
-    # Set json_body/success_field/success_value according to the provider contract.
 )
-# Inside the task's async function, between browser sessions:
-# result = await core.rotate_ip("mobile-1", provider,
-#                               probe_url="https://api.ipify.org?format=json")
-```
 
-For custom SDKs, implement `async def rotate(self, proxy: ProxyConfig) -> None`.
-Raise on failure; let the core handle locking, deadlines, and independent IP
-confirmation. Do not automatically retry a provider rotation request. Keep shared
-modem ports mapped to the same `proxy_channels` identifier. OS locks coordinate
-only one host/shared local root, not multiple machines.
+# Rotate IP between sessions and verify exit IP change before proceeding:
+# result = await core.rotate_ip("mobile-modem-1", provider, probe_url="https://api.ipify.org?format=json")
+# print("New public exit IP:", result.new_ip)
+```

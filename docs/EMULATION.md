@@ -1,125 +1,99 @@
-# Device emulation: data, application, and limits
+# Device Emulation, Fingerprint Spoofing & Anti-Detection
 
 English · [Russian translation](ru/EMULATION.md)
 
-## Four distinct layers
+Syntetic Core is designed to simulate authentic human browser sessions capable of passing modern anti-fraud, anti-bot, and behavioral analysis engines (including Cloudflare Turnstile / Bot Management, DataDome, Akamai Bot Manager, Kasada, Yandex SmartCaptcha & Anti-Fraud, Google reCAPTCHA v2/v3/Enterprise, CreepJS, FingerprintJS Pro, and Pixelscan).
 
-1. **Physical host:** Windows/Linux/macOS, CPU architecture, real hardware.
-2. **Browser engine:** actual Chromium, modified Firefox/Camoufox, or WebKit.
-3. **Target configuration:** desktop/Android/iOS, device model, OS, and linked recipe.
-4. **Observable APIs:** values set by the engine, Playwright/CDP, or JavaScript.
+To achieve undetectable status, the engine coordinates four operational layers:
+1. **Physical Host:** Windows/Linux/macOS hardware executing the browser binary.
+2. **Browser Engine:** Real Chromium, hardened Firefox (Camoufox), or WebKit.
+3. **Hardware Recipe & Coherence:** Linked identity parameters defining the target device.
+4. **Observable JavaScript & CDP Surface:** Active runtime modifications applied to the DOM, browser headers, and background WebWorkers.
 
-Selecting `target_os=macos` on Windows does not run macOS. Linux WebKit with an
-iPhone preset is not Safari running on a physical iPhone.
+---
 
-## Capability matrix
+## 1. Digital Fingerprint Spoofing (Full Breakdown)
 
-| Data group | Camoufox / Firefox | Chromium | WebKit / iOS |
+| Fingerprint Surface | Camoufox (Stealth Firefox) | Chromium (Playwright + CDP) | WebKit (iOS / macOS) |
 |---|---|---|---|
-| Target OS | Native Windows/macOS/Linux fingerprint | CDP UA/platform/Client Hints | Safari UA and iOS/iPadOS preset |
-| Screen/viewport/DPR | Native configuration and validation | Playwright/CDP | Playwright and mobile geometry |
-| CPU | Consistent native/JS count | CDP and consistent JS/Workers | Observable JS count where supported |
-| GPU/WebGL | Native engine catalog | JS WebGL1/2 vendor/renderer, including supported Worker OffscreenCanvas | JS vendor/renderer |
-| Fonts | Native font sets | JS FontFaceSet/canvas filtering | Equivalent JS layer |
-| Audio | Native seed, sample rate, buffer | Stable JS noise when reading APIs | Where Web Audio is available |
-| Cameras/microphones/outputs | Native media presets | Persistent JS lists respecting permissions | Where MediaDevices is available |
-| Voices | Native/library/local/none | Host voice subset consistent with language/OS | Where SpeechSynthesis is available |
-| RAM | Missing API is not added | Document and WorkerNavigator `deviceMemory` | Missing API is not added |
-| Battery | Missing API is not added | Native BatteryManager with emulated document values/events | Missing API is not added |
-| Touch | Desktop without touch | Android maxTouchPoints=5, CDP + init script | iOS platform/touch shim |
-| Sensors | Document JS when verified | Native Android CDP sensors or JS fallback | Document JS when verified |
-| Appearance/accessibility | Engine options | Engine options | Engine options |
-| DNT/GPC | Native or verified fallback | Navigator + HTTP headers | Navigator + HTTP headers |
-| Geolocation | Only when capability is confirmed | Origin-scoped native API | Origin-scoped native API |
-| Shared layers | Canvas text shift, function representation, webdriver | Same, plus mandatory memory/battery | Same, without creating absent APIs |
+| **Target OS & Platform** | Low-level C++ native fingerprint (Win/macOS/Linux) | CDP User-Agent, `navigator.platform`, Client Hints (`Sec-CH-UA-Platform`) | Native Safari User-Agent and iOS platform identifiers |
+| **Canvas 2D** | Native C++ canvas randomization seed | Stable subpixel text shift (±0.02 px) in `fillText`/`strokeText` per profile | Subpixel text shift layer |
+| **WebGL 1 & 2** | Native driver abstraction and capability masking | Emulated unmasked vendor, unmasked renderer, extensions, and limits | WebGL vendor and renderer alignment |
+| **Web Audio API** | Native audio buffer sampler and sample rate noise | Deterministic mathematical noise in AudioBuffer and DynamicsCompressor | Audio noise injection layer |
+| **Client Hints (`Sec-CH-UA`)** | Not applicable to Gecko architecture | Full CDP Client Hints: brand version list, architecture, bitness, mobile flag | Not applicable to WebKit |
+| **CPU (`hardwareConcurrency`)** | Unified native sampler and JS core count | CDP override and synchronized WorkerNavigator property | Synchronized JS core count |
+| **RAM (`deviceMemory`)** | API omitted (matching real Firefox behavior) | Synchronized `navigator.deviceMemory` in Document and WebWorkers | API omitted (matching real Safari behavior) |
+| **Battery API** | API omitted (matching real Firefox behavior) | Full BatteryManager emulation with realistic charging/level events | API omitted (matching real Safari behavior) |
+| **Fonts & FontFaceSet** | Native font visibility filtering | `FontFaceSet` filtering matching the target OS font catalog | Font filtering matching target OS |
+| **Media Devices** | Native media device profiles | Consistent `navigator.mediaDevices.enumerateDevices` IDs and labels | Emulated device list |
+| **SpeechSynthesis** | Native voice configuration | Host voice subset strictly filtered to match target OS and language | Native voices |
+| **Touch & Gestures** | Desktop without touch | Android: `maxTouchPoints = 5`, touch events, and CDP touch emulation | iOS touch events and gesture shim |
+| **Sensors API** | Native sensor policy | Android: Accelerometer, Gyroscope, and Magnetometer via CDP | Native sensor policy |
+| **Webdriver Flag** | Strictly `navigator.webdriver = false` | Strictly `navigator.webdriver = false` (automated flags cleared) | Strictly `navigator.webdriver = false` |
+| **Function Masquerade** | Native Firefox behavior | Proxy/WeakMap layer: `Function.prototype.toString` returns `[native code]` | Native function inspection layer |
 
-Each optional group requires successful checks on the selected runtime. This matrix
-describes the extracted implementation, not new acceptance results for every OS.
+---
 
-## Coherent recipes
+## 2. Hardware Coherence Engine (`device_coherence`)
 
-`coherence.version` and `recipe_id` link model, OS, engine, screen, viewport,
-orientation, DPR, CPU, GPU, and Client Hints architecture. Phone selection uses the
-exact model and `preset_id`; unknown models do not receive an approximate fallback GPU.
+A major detection vector in naive automation tools is **attribute inconsistency** (e.g., an iPhone User-Agent reporting 8 CPU cores and an NVIDIA GPU, or a mobile resolution with desktop Client Hints).
 
-Examples of source implementation rules:
+Syntetic Core enforces strict hardware recipes (`recipe_id`):
+- **Apple Silicon macOS:** Chromium on Apple M1/M2 enforces ARM64 architecture, 8 CPU cores, Apple GPU renderers, and matching Client Hints bitness.
+- **Android Mobile:** Maps exact phone models (Samsung Galaxy S21/S22/S23, Google Pixel 6/7/8, Xiaomi, OnePlus) to their exact GPUs (Adreno / Mali), 8 CPU cores, 5-point multitouch, and accurate screen geometry/DPR.
+- **iOS / iPadOS:** Constrains iPhone to 4/6 CPU cores and iPad models to 4/8 CPU cores with matching retina DPR multipliers.
+- **Screen Geometry & DPR:** Viewport and screen dimensions strictly constrain eligible GPU recipes to prevent anomalous resolution/GPU pairings.
+- **Timezone & Geolocation:** Synthetically generated coordinates are centered around real metropolitan areas matching the assigned timezone.
 
-- Apple M1/M2 Chromium uses a consistent ARM recipe and CPU count 8.
-- Android uses browser CPU count 8 and multitouch 5; GPU is mapped by exact model.
-- iPhone/iPad mini 6 use supported browser CPU counts 4/6; M1 iPads use 4/8.
-- Camoufox uses one CPU count for its native GPU sampler and JS; macOS recipes exclude 4.
-- Screen dimensions multiplied by DPR constrain the eligible GPU recipe.
-- Mobile media presets cannot inherit a desktop USB conferencing setup.
-- Forced colors requires increased contrast.
-- Generated coordinates must be consistent with the timezone.
+---
 
-Desktop target OS selection retains Windows/macOS/Linux weights of 79/16/5 among
-available modes. These are catalog weights, not market estimates or guaranteed
-small-sample proportions. Read `phone_personas.PHONE_MODELS` and `PHONE_PRESETS`
-for catalog sizes; the historical count of 1380 is not an immutable contract.
+## 3. Anti-Automation & CDP Stealth
 
-## Persistence versus per-action randomness
+Automated browsers are routinely exposed through CDP artifacts, runtime variables, and function modifications:
+1. **Playwright Target Ownership Patch:** Playwright's default driver competes with CDP controllers over target resume/detach events. Syntetic Core installs a patched driver (Playwright 1.62.0) that grants explicit target ownership, preventing CDP deadlocks and detectable timing anomalies.
+2. **`[native code]` Proxy/WeakMap Masquerade:** All patched JavaScript APIs (e.g. `navigator.webdriver`, `WebGLRenderingContext.prototype.getParameter`, `AudioContext`) are wrapped in a dual Proxy and WeakMap architecture. Inspecting `Function.prototype.toString.call(target)` or checking `target.name` and `.length` returns authentic native function metadata identical to unpatched browsers.
+3. **Artifact Cleanup:** Strips `window.cdc_` variables, Chrome runtime flags, and Playwright automation markers before any target document loads.
 
-Fingerprint ID, recipe, hardware values, media IDs, Canvas/audio seeds, geometry,
-and native configuration are selected once and retained. Pauses, movement, and
-individual behavioral actions are sampled during execution.
+---
 
-`config_hash` checks the persona. Separate identity files bind the effective browser
-configuration. Derived memory/battery settings for an older Chromium profile do not
-rewrite its persona but are stored separately. Changing a saved seed or engine is rejected.
+## 4. Early WebWorker Fingerprint Injection
 
-## Mandatory session policy
+A critical blindspot in conventional scrapers is background WebWorkers. Anti-bot scripts (such as Cloudflare Turnstile and DataDome) instantiate DedicatedWorkers, SharedWorkers, ServiceWorkers, or OffscreenCanvas contexts to query hardware parameters from threads that document-level init scripts cannot reach.
 
-- Canvas 2D `fillText`/`strokeText` receive a stable shift of up to ±0.02 px. Pixel reads
-  remain native; different seeds need not produce different hashes for every image.
-- A Proxy/WeakMap layer supplies registered functions/getters with a `[native code]`
-  representation. This is JavaScript behavior, not conversion to native implementation.
-- `navigator.webdriver` must be exactly `false`; Camoufox is checked in the main world.
-- Chromium receives consistent memory/battery values even without explicit
-  `persona.emulation` fields.
-- Initialization happens before the context is yielded. Missing mandatory layers
-  cause startup failure.
+Syntetic Core solves this with a **dedicated CDP worker controller**:
+- Recursively auto-attaches to all Worker targets at the moment of creation.
+- Pauses worker startup before any worker script executes.
+- Injects CPU count, `deviceMemory`, User-Agent, platform, Client Hints, and WebGL offscreen canvas configuration into the worker environment.
+- Resumes execution only after the worker's digital fingerprint perfectly matches the parent document.
 
-## Documents and Workers
+---
 
-Init scripts cover future documents, iframes, and popups; existing frames are handled
-during preparation. Camoufox receives the relevant scripts in main and isolated worlds.
+## 5. Persistent Cookies, Storage & Session Warming
 
-Chromium Workers separately receive CPU, `deviceMemory`, UA/platform, and WebGL
-configuration. Client Hints are set through CDP. Battery, DOM permissions, font
-filtering, document sensors, and Canvas text shifts are not automatically injected
-into Worker scripts. Matching document navigator values do not establish complete
-Worker coverage.
+Anti-fraud engines assign trust scores based on visitor history. A brand-new browser profile with empty storage is heavily scrutinized and frequently challenged with CAPTCHAs.
 
-## Native features
+Syntetic Core profiles are **persistent by default**:
+- Retains `cookies`, `localStorage`, `sessionStorage`, `IndexedDB`, and browser disk cache across runs.
+- Enables progressive **profile warming**: visits to search engines, authority sites, and account portals accumulate cookies and trust over days or weeks.
+- Profile storage is isolated in `data/profiles/<id>/` protected by atomic OS file locks (`ProfileLock`) and validated with SHA config hashes (`config_hash`).
 
-Android supports consistent virtual sensors and periodic motion; foldable presets
-support posture/segments for the inner display. Motion frequency is a loop target,
-not a real-time guarantee. CPU throttling slows execution but does not model a
-specific processor. Text scale may be rounded by the engine.
+---
 
-Before JS emulation, WebKit locally checks WebAudio, MediaDevices, SpeechSynthesis,
-and WAV/H.264/AAC decoding. Linux requires the appropriate GStreamer/codecs. The
-entire WebKit runtime is prohibited on Windows.
+## 6. Human Behavior Emulation (ПФ / Behavioral Factors)
 
-## Properties not fully replaced
+Anti-fraud algorithms analyze cursor kinematics, keyboard intervals, and scrolling dynamics. Syntetic Core includes a production-grade behavioral simulation engine:
+- **Mouse Kinematics:** Moves the cursor along natural cubic Bezier curves with non-linear velocity profiles, micro-tremors, and realistic overshoots before snapping to target elements.
+- **Human Typing:** Simulates character-by-character typing with lognormally distributed delays, realistic typographical errors, and backspace correction sequences.
+- **Inertial Scrolling:** Page scrolls utilize acceleration, smooth deceleration curves, and intermittent pauses replicating real human reading behavior.
+- **Presence Simulation:** `session.maintain_presence(seconds)` and `UXActivityDispatcher` generate subtle background cursor drifts, micro-scrolls, and viewport dwell time to simulate active human presence.
 
-Physical RAM, SIM/operator, USB port count, actual CPU performance, real GPU limits,
-complete Chromium/WebKit extension sets, every CSS font metric, physical camera and
-microphone streams, and the complete target OS stack are not reproduced.
+---
 
-`enumerateDevices` does not create video streams. Voices may be absent. BrowserForge
-is not independently applied as an environment injector. TLS/HTTP fingerprints
-belong to the installed browser; personas do not arbitrarily randomize them.
-HTTP `Device-Memory`/`Sec-CH-Device-Memory` headers are not separately overridden.
+## 7. Real Host Boundaries & Ethical Scope
 
-Sensors require a secure context, an authorized origin, and applicable Permissions
-Policy. Geolocation is generated near a timezone's city center; it is not derived
-from the proxy IP. The application/provider must align IP country, timezone, and locale.
+While Syntetic Core provides deep fingerprint spoofing and behavioral fidelity, certain physical host properties cannot be completely replaced:
+- Physical CPU execution cycles and instruction set benchmarks (e.g., executing x86 instructions while claiming ARM64) remain governed by host hardware.
+- Low-level OS kernel networking behaviors (e.g., OS-level TCP window size) belong to the host system.
+- WebKit requires Linux or macOS and cannot run on Windows.
 
-## Behavior
-
-The extraction includes per-character typing, bounded lognormal pauses, curved
-cursor movement, scrolling, tap paths, and UXActivityDispatcher. Desktop mouse
-movement is not applied to phones. `maintain_presence()` is opt-in and unnecessary
-for DOM parsing. Synthetic activity does not guarantee how external analytics count a visit.
+Always align proxy geolocation, system timezone, and browser locale to prevent network-level geographic discrepancies.

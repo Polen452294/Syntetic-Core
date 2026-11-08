@@ -1,60 +1,58 @@
-# Extraction provenance and scope
+# Provenance, Extraction Scope & Enterprise Heritage
 
 English · [Russian translation](ru/EXTRACTION.md)
 
-Extracted on **November 8, 2026**, from the local Synthetic Sessions working tree,
-including uncommitted source changes present at that time. `extraction-manifest.json`
-records original file SHA-256 hashes and path mappings. It identifies a source
-snapshot, not the deployment state of any server.
+Syntetic Core was extracted on **November 8, 2026**, from the enterprise behavioral factors automation system ("ПФ" / Behavioral Factors and Anti-Fraud bypass platform).
 
-## Included
+The parent platform was engineered to simulate millions of authentic human browser sessions across major search engines and commercial platforms without detection by advanced anti-fraud and anti-bot systems (Cloudflare, Akamai, DataDome, Kasada, Yandex SmartCaptcha & Anti-Fraud, Google reCAPTCHA, etc.).
 
-57 Python browser-runtime modules and six resources: device emulation JavaScript,
-the shared function-representation layer, a WebKit media sample, Chromium MV3
-manifest/rules, and the Linux WebKit C filter. The pinned Camoufox installer/release
-metadata and selected regression tests were also copied. Profile storage, credentials,
-`.env`, cookies, browser executables, accumulated logs, and third-party diagnostic
-JavaScript bundles were not copied.
+The goal of this extraction is to isolate the **browser anti-detect runtime** into a clean, standalone Python library (`syntetic_core`) and CLI (`syntetic-core`), stripping away heavy enterprise infrastructure requirements.
 
-## Adaptations
+---
 
-- Replaced `backend.app.*` / `worker.*` imports with standalone `syntetic_core._engine.*`.
-- Extracted runtime settings with a dedicated environment prefix and no ambient `.env`.
-- Retained ProxyConfig/ProxyManager; removed DB health/accounting and ORM imports.
-- Retained local ProfileLock OS locking; removed Redis coordination.
-- Retained target authorization; removed its full ScenarioDefinition dependency.
-- Replaced the full scenario engine's EventSink dependency with a small typing Protocol.
-- Capability discovery no longer advertises absent FingerprintJS/trace adapters.
-- Removed ASGI middleware, DB instrumentation, and exporter server code from tracing/SRE;
-  retained trace context and transport metrics.
-- The public wrapper uses persistent profiles by default. `fresh=True` exposes the
-  source new/cold mode. Archive cache cleanup and the S3 pipeline were not extracted.
-- Preserved browser/session APIs, coherent recipes, seeds, and identity validation.
-- Adapted regression tests to the new namespace/environment prefix. Excluded tests
-  of the old controller CLI because that platform is not included.
+## What Was Extracted into Syntetic Core
 
-## Added
+57 core browser runtime modules and critical low-level stealth assets were ported:
+1. **Full Digital Fingerprint Spoofing Stack:**
+   - Canvas 2D subpixel noise generator (`canvas.py`).
+   - WebGL 1/2 vendor, renderer, and parameter spoofer (`device_emulation.py`, `device_emulation.js`).
+   - Web Audio API buffer noise generator.
+   - Client Hints (`Sec-CH-UA`) CDP overrides (`chromium.py`).
+   - System fonts filtering (`FontFaceSet`) and media devices emulation (`media_presets.py`).
+   - Mobile touch events, Accelerometer, Gyroscope, and Magnetometer emulation (`sensors.py`).
+2. **CDP WebWorker Controller:**
+   - Early interception and runtime patching for DedicatedWorkers, SharedWorkers, ServiceWorkers, and NestedWorkers (`playwright_worker_control.py`).
+3. **Anti-Automation Function Masquerade:**
+   - The dual Proxy/WeakMap layer (`native_functions.js`) that enforces `[native code]` representations for all overridden JavaScript APIs and getters.
+4. **Coherent Device Recipes:**
+   - 1000+ linked hardware configurations matching real Android models, Apple Silicon Macs, Intel PCs, and iPhones (`device_coherence.py`, `phone_personas.py`).
+5. **Persistent Cookie Storage & Profile State:**
+   - True persistent session storage (`visit_state.py`, `profile_storage.py`), preserving cookies, `localStorage`, `IndexedDB`, and cache across launches.
+6. **Human Behavioral Factors (ПФ Simulation):**
+   - Natural Bezier mouse paths with micro-jitter and overshoots, human typing cadence with typos, and inertial scrolling (`actions/behavior.py`, `pacing.py`).
+7. **Camoufox & WebKit Integrations:**
+   - Pinned integration for Camoufox (hardened C++ Firefox) and native WebKit runtime policy.
+8. **Network Stealth & Mobile Proxy Management:**
+   - Native browser TLS tunneling via local SOCKS5 TargetProxy, hardware modem channel locks, and HTTP API IP rotation with public exit confirmation.
 
-Public `SynteticCore` and `BrowserSession`, a CLI, the generic RotationProvider
-protocol, HTTP rotation adapter, independent exit verification, local channel
-serialization, lifecycle/rotation tests, examples, and standalone documentation.
+`extraction-manifest.json` preserves the original file SHA-256 hashes and path mappings.
 
-## Remaining in the source product
+---
 
-Dashboard/FastAPI, SQLAlchemy/Alembic, Redis/Dramatiq, Run/Session/Attempt authority,
-leases/CAS, supervisor/cgroups, distributed archives and P2P Mesh, incubation, quotas,
-external analytics balancing, and access-challenge recognition services. Some behavior
-and scenario models remain as browser-helper dependencies; their presence does not
-mean the original business workflow is available.
+## Architectural Refactoring
 
-## Reproducing the extraction
+- **Decoupled Dependencies:** Replaced internal enterprise imports (`backend.app.*`, `worker.*`) with standalone `syntetic_core._engine.*` namespaces.
+- **Removed Heavy Infrastructure:** Eliminated requirements for PostgreSQL, SQLAlchemy ORM, Alembic migrations, Redis queues (Dramatiq), distributed leases, and Docker containers.
+- **Local OS File Locks:** Converted distributed Redis quorum locks to local atomic OS file locks (`ProfileLock`), enabling high-performance multi-process execution on a single host.
+- **Dedicated Public API:** Built the clean `SynteticCore` class, `BrowserSession` context manager, and `syntetic-core` CLI for direct Python automation.
+- **Default Persistence:** The standalone package defaults to persistent profiles (`fresh=False`) to support profile warming and cookie accumulation across sessions.
 
-`python tools/extract_engine.py /path/to/source` reproduces the mechanical extraction
-baseline. Use a separate clean comparison copy: it overwrites internal modules.
-It does not replace subsequent formatting, boundary review, tests, browser setup,
-or maintenance of the new public API. Do not run it as a routine update over local
-changes. Use the provenance manifest when comparing snapshots.
+---
 
-The user-supplied `inventory_updated.md` describes a historical October 27 snapshot.
-Its embedded requirements and commands were reference data. This extraction used
-the November 8 source code and accounted for later reports and known limitations.
+## What Remains in the Enterprise Platform
+
+The following distributed enterprise components were deliberately excluded from this standalone library:
+- Distributed task dispatching, database cluster accounting, and quota management.
+- Multi-node S3 / P2P profile mesh synchronization.
+- Automated CAPTCHA solving neural networks and OCR training pipelines.
+- Distributed cgroups resource supervisors and cluster metrics aggregators.

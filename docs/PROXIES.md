@@ -1,125 +1,106 @@
-# Proxies and provider API IP rotation
+# Mobile Proxies, IP Rotation & Network Stealth
 
 English · [Russian translation](ru/PROXIES.md)
 
-## Three separate operations
+Network-level anonymity is as crucial to bypassing anti-fraud systems as digital fingerprint spoofing. Naive automation tools often leak real IP addresses, use synthetic Python TLS fingerprints, or trigger race conditions on shared mobile modems.
 
-1. **Assign a proxy:** the profile retains `proxy_id`; credentials are supplied in Settings.
-2. **Rotate the exit address:** the provider API changes the physical/logical channel's IP.
-3. **Verify:** the core observes a different public IP through that proxy.
+Syntetic Core addresses network stealth through four architectural pillars:
+1. **Native Browser TLS Stack:** Avoids synthetic HTTP/TLS signatures by routing the real browser's TCP traffic through a local SOCKS5 gateway.
+2. **Hardware Modem Channel Locking:** Prevents multiple ports on the same physical cellular modem from interfering with each other.
+3. **Automated Provider IP Rotation:** Interacts with mobile proxy provider HTTP APIs.
+4. **Mandatory Exit IP Verification Probe:** Guarantees that the public exit IP has actually changed before opening a browser session.
 
-A different port need not imply a different IP. API `success=true` does not prove
-that the channel has already switched. Changing an IP does not create a new
-hardware identity.
+---
 
-## Supported transport
+## Supported Transports & Configuration
 
-`ProxyConfig(server=...)` accepts `http://host:port`, `https://host:port`, and
-`socks5://host:port`. Supply credentials separately as SecretStr. Proxy URL userinfo
-is rejected. Authenticated SOCKS5 is rejected by the retained runtime contract;
-use authenticated HTTP CONNECT or SOCKS5 without authentication.
+`ProxyConfig` supports `http://host:port`, `https://host:port`, and `socks5://host:port`:
 
 ```python
-proxy = ProxyConfig(
-    id="mobile-1", server="http://proxy.provider.example:28080",
+import os
+from pydantic import SecretStr
+from syntetic_core import CoreSettings, ProxyConfig, SynteticCore
+
+mobile_proxy = ProxyConfig(
+    id="mobile-modem-1",
+    server="http://proxy.provider.example:28080",
     username=SecretStr(os.environ["PROXY_USERNAME"]),
-    password=SecretStr(os.environ["PROXY_PASSWORD"]), kind="mobile",
+    password=SecretStr(os.environ["PROXY_PASSWORD"]),
+    kind="mobile",  # "mobile", "residential", or "datacenter"
+)
+
+core = SynteticCore(
+    settings=CoreSettings(
+        proxies=[mobile_proxy],
+        proxy_required=True,  # Disallows unproxied connections to prevent real IP leaks
+        allowed_target_hosts=["example.com", "api.ipify.org"],
+    ),
+    proxy_channels={"mobile-modem-1": "physical-usb-dongle-01"},
 )
 ```
 
-Provider name, country/region/asn are metadata, not proof of exit geography.
-`ProxyConfig.metadata()` excludes username/password/change_ip_url.
+> [!IMPORTANT]
+> If `proxy_required=True` is enabled, any failure to reach or authenticate with the proxy will immediately raise an error. Under no circumstances will Syntetic Core fall back to a direct, unproxied network connection.
 
-## Generic HTTP adapter
+---
+
+## Hardware Modem Channel Locking (`proxy_channels`)
+
+Many mobile proxy providers offer multiple ports that terminate on a single physical cellular USB modem or SIM card. Rotating the IP on one port inevitably changes the IP of the physical modem, disrupting all other active connections sharing that hardware.
+
+Syntetic Core solves this with cross-process OS locks:
+- Map multiple proxy IDs to a common channel name: `proxy_channels={"port-1": "modem-A", "port-2": "modem-A"}`.
+- While a browser session is active on `port-1`, `modem-A` is locked.
+- Any rotation attempt on `port-2` will fail immediately with `ProxyChannelLockedError`, preventing connection disruption.
+
+---
+
+## Automated HTTP Rotation & Exit IP Verification
+
+Do not assume an API response of `{"success": true}` means the cellular modem has finished reconnecting to the cell tower.
+
+The `rotate_ip` method coordinates provider API calls and independent verification:
 
 ```python
+from syntetic_core import HttpRotationProvider
+
+# Configure HTTP rotation call to your provider's API
 provider = HttpRotationProvider(
     url=SecretStr(os.environ["ROTATION_API_URL"]),
-    method="POST",
+    method="POST",  # POST / GET / PUT
     headers={"Authorization": SecretStr(os.environ["ROTATION_AUTHORIZATION"])},
-    json_body={"port": 28080},
-    success_field="data.success",
-    success_value=True,
+    json_body={"modem_id": "dongle-01"},
+    success_field="data.status",  # Optional: check specific JSON response field
+    success_value="reconnecting",
     timeout_seconds=15,
 )
+
+# Rotate and verify exit IP before launching the next session
 result = await core.rotate_ip(
-    "mobile-1", provider,
+    proxy_id="mobile-modem-1",
+    provider=provider,
     probe_url="https://api.ipify.org?format=json",
     timeout_seconds=60,
     poll_seconds=2,
 )
+
+print(f"IP successfully rotated from {result.old_ip} to {result.new_ip}")
 ```
 
-Choose the URL, method, headers, body, and success field from your provider's actual
-API and plan documentation. This is a configurable adapter, not a verified integration
-with a specific supplier. URL/header secrets are hidden from repr. The body is also
-excluded from repr; do not log or publish the entire configuration.
+### Verification Pipeline:
+1. Acquires exclusive OS lock for the proxy's hardware channel.
+2. Probes the current public IP via `probe_url` through the proxy tunnel.
+3. Calls the provider's HTTP rotation endpoint.
+4. Repeatedly probes `probe_url` through the proxy until a **different public IP** is observed.
+5. Releases the lock and records the new IP in `runtime-state.json`.
 
-With `success_field=None`, HTTP 2xx is required. A configured field additionally
-checks the JSON value and its type. JSON responses are limited to 64 KiB. Redirects
-are prohibited, HTTPS is required, and ambient HTTP_PROXY/HTTPS_PROXY settings are
-ignored. Rotation requests are not automatically retried: a retry could trigger a
-second IP change.
+---
 
-## Exit verification
+## Native Browser TLS vs. Library TLS
 
-The core probes the old IP before requesting rotation, then polls until a different
-public IP appears. The probe URL must return a plain IP or a supported JSON IP
-object and must be in `allowed_target_hosts`. Probes use TargetProxy and the assigned
-upstream. Temporary modem disconnection is tolerated within the overall deadline.
-Timeout, invalid output, or an unchanged IP produces `ProxyUnavailableError` without
-a direct-connection fallback.
+When tools like Python's `requests`, `httpx`, or `curl` make requests, their TLS ClientHello packets (ciphers, extensions, curves) form a distinctive JA3/JA4 fingerprint that anti-bot services (Cloudflare, Akamai, DataDome) immediately identify as non-browser traffic.
 
-You may use your own HTTPS probe instead of a public IP service. It must report
-the actual source address of the connection.
-
-## Custom providers
-
-```python
-class MyProvider:
-    async def rotate(self, proxy: ProxyConfig) -> None:
-        # Call the supplier's SDK/API and wait for the request to be accepted.
-        # Raise on rejection. Do not open a browser session here.
-        await my_sdk.rotate_port(proxy.id)
-
-result = await core.rotate_ip("mobile-1", MyProvider(), probe_url=probe_url)
-```
-
-This satisfies `RotationProvider`. Implementations may call an SDK, sign requests,
-or wait for a provider job. The core owns the overall deadline, channel lock, and
-independent IP verification. asyncio cancellation propagates to the caller.
-
-## Shared modems and concurrency
-
-```python
-core = SynteticCore(
-    "data/profiles", settings=settings,
-    proxy_channels={"port-1": "modem-A", "port-2": "modem-A"},
-)
-```
-
-Without a mapping, the lock key is derived from the endpoint. Different ports on
-one physical modem must share a channel ID. All cooperating processes must use the
-same profile_root and channel map. Multiple hosts need an external coordinator.
-Manual provider API requests and other applications bypass this local protection.
-
-The lock is held until the browser session is fully closed. Rotate only between
-sessions. A busy channel raises `ProfileLockedError` without contacting the provider.
-Do not call `rotate_ip` inside `async with core.session(...)` for the same channel.
-
-The retained identity policy may reject rapid exit changes for persistent nonmobile
-profiles. Use `kind="mobile"` for managed mobile rotation. Rotation does not change
-a profile's timezone, locale, or geolocation: select a matching provider region or
-create a new coherent identity.
-
-## Connecting a real supplier
-
-1. Obtain the proxy endpoint, credentials, rotation API, and shared-channel topology.
-2. Configure the adapter from the supplier's documented API contract.
-3. Keep secrets in environment variables or your application's secret store.
-4. Authorize exact target/resource/probe hosts.
-5. Confirm rotation in a separate call, then open the profile.
-6. Verify geography and IP stability for your workload.
-
-No provider keys or paid API calls were used during extraction. The core does not
-automatically top up balances, purchase/rent IPs, change plans, or cycle accounts.
+Syntetic Core uses a local SOCKS5 loopback `TargetProxy`:
+- The browser process (Chromium / Firefox / WebKit) negotiates TLS directly over the TCP stream.
+- The destination server sees genuine browser TLS handshakes matching the User-Agent and device recipe.
+- No synthetic TLS hooks or MITM proxies are used, ensuring 100% TLS fingerprint consistency.

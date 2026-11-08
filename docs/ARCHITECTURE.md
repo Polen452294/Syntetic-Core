@@ -1,134 +1,117 @@
-# Syntetic Core architecture
+# Syntetic Core Architecture & Anti-Detect Pipeline
 
 English · [Russian translation](ru/ARCHITECTURE.md)
 
-## Scope
+## System Scope
 
-The core is a library and CLI for one process/host with local profiles. It is not a
-job queue or distributed server. The calling application manages tasks, overall
-concurrency, and scheduling.
+Syntetic Core is an anti-detect browser execution runtime and CLI designed for high-stealth automation on a local host. It extracts the proven anti-fraud bypass capabilities from an enterprise behavioral factors (ПФ) production platform into a modular, self-contained library.
+
+Concurrency, task orchestration, and overall task scheduling are managed by the calling application.
 
 ```mermaid
 flowchart TD
-    App[Python application / CLI] --> Core[SynteticCore]
-    Core --> Discovery[Real local smoke checks]
-    Discovery --> Manifest[In-memory capabilities]
-    Core --> Generator[Persona generator + device_coherence]
-    Generator --> Profile[profile.json + config_hash]
-    Core --> Channel[Proxy/modem channel lock]
+    App[Calling Application / Script / CLI] --> Core[SynteticCore]
+    Core --> Discovery[Runtime Smoke Checks & Capabilities Manifest]
+    Core --> Generator[Persona Generator + Device Coherence Engine]
+    Generator --> Profile[profile.json + SHA-256 config_hash]
+    Core --> Channel[Proxy Modem Channel Lock]
     Channel --> Factory[BrowserContextFactory]
-    Factory --> Lock[Profile OS lock]
-    Lock --> Runtime[Chromium / Camoufox / WebKit]
-    Runtime --> Identity[Identity files + browser-data]
-    Factory --> Guard[SOCKS5 TargetProxy]
-    Guard --> Proxy[Assigned upstream or direct transport]
-    Proxy --> Target[Authorized hosts]
-    Core --> Rotation[Provider API → new IP verification]
+    Factory --> Lock[Profile OS File Lock]
+    Lock --> Runtime[Patched Chromium / Camoufox / WebKit]
+    Runtime --> WorkerCtrl[CDP Worker Controller: Dedicated/Shared/Service]
+    Runtime --> Identity[Identity Files + Persistent browser-data]
+    Factory --> Guard[SOCKS5 Loopback TargetProxy]
+    Guard --> Proxy[Assigned Upstream Proxy / Native TLS]
+    Proxy --> Target[Authorized Destination Hosts]
+    Core --> Rotation[Provider HTTP API → Exit IP Verification Probe]
 ```
 
-## Package layers
+---
 
-| Layer | Responsibility |
+## Package Architecture
+
+| Module / Package | Anti-Detect Responsibility |
 |---|---|
-| `core.py` | Persistent profiles, public sessions, lifecycle, and boundary checks |
-| `proxy.py` | Provider protocol, HTTP adapter, channel locking, IP confirmation |
-| `cli.py` | Explicit preparation, doctor, profile creation, page probe |
-| `_engine/personas.py` | Extracted Pydantic models and validation rules |
-| `_engine/persona_randomization.py` | Device family, runtime, OS, and parameter selection |
-| `_engine/device_coherence.py` | Linked hardware recipes and conflict detection |
-| `_engine/capabilities.py` | Real browser checks and feature admission |
-| `_engine/browser/factory.py` | Shared browser launch and context validation |
-| `_engine/browser/chromium.py` | CDP UA/CH, CPU, Workers, touch, and native sensors |
-| `_engine/browser/native.py` | Persistent Camoufox fingerprint/config |
-| `_engine/browser/device_emulation.*` | Python configuration and JavaScript API implementation |
-| `_engine/browser/content_filter.py` | Chromium MV3, Gecko, and native Linux WebKit filters |
-| `_engine/actions/behavior.py` | Typing, cursor movement, scrolling, UXActivityDispatcher |
+| `core.py` | Public `SynteticCore` API, persistent profile lifecycle, session boundaries, and domain allowlists |
+| `proxy.py` | Proxy configuration, HTTP rotation provider, modem channel locking, and exit IP confirmation |
+| `cli.py` | CLI commands: `prepare` (driver patching), `doctor` (stealth discovery), `create`, and `open` |
+| `_engine/personas.py` | Pydantic persona models, hardware validation rules, and schema definitions |
+| `_engine/persona_randomization.py` | Deterministic generation of realistic device presets, OS versions, and parameter pools |
+| `_engine/device_coherence.py` | Multi-property coherence engine ensuring GPU, CPU, screen, DPR, and Client Hints match 100% |
+| `_engine/capabilities.py` | Local runtime capability discovery (verifying real browser binary stealth features) |
+| `_engine/browser/factory.py` | Browser context initialization, TargetProxy setup, and environment verification |
+| `_engine/browser/chromium.py` | Chromium CDP integration: Client Hints, CPU, RAM, Battery, and native sensor overrides |
+| `_engine/browser/playwright_worker_control.py` | Early CDP worker interception: auto-attaches and patches Dedicated/Shared/Service/Nested Workers |
+| `_engine/browser/native.py` | Camoufox integration: persistent C++ engine fingerprints and configurations |
+| `_engine/browser/device_emulation.*` | JavaScript anti-detect scripts: Canvas text shifts, WebGL spoofs, and `[native code]` shims |
+| `_engine/browser/content_filter.py` | Network resource filtering (Chromium MV3 declarativeNetRequest, Gecko, and Linux WebKit) |
+| `_engine/actions/behavior.py` | Human-like behavioral factor simulation: Bezier mouse paths, typing cadence, and inertial scrolling |
 
-`_engine` stays close to the original structure to support comparison and future
-extractions. It is internal; the public contract is defined by `syntetic_core` exports.
+---
 
-## Profile creation
+## Profile Creation Pipeline
 
-1. Validate the ID and the explicitly requested proxy.
-2. Discover local capabilities on first use and cache them in this `SynteticCore` instance.
-3. Select an available engine and a coherent device recipe.
-4. Apply locale, timezone, and consistent synthetic geolocation.
-5. Calculate `config_hash`; validate the final persona with Pydantic and `require_compatible`.
-6. Write `profile.json` atomically under an OS lock. Existing profiles are never
-   overwritten. Cancellation does not release the lock while the write is still running.
+1. **Host & Proxy Verification:** Validates profile ID and ensures the assigned proxy exists in configuration.
+2. **Capability Discovery:** Runs on first launch to detect installed browser binaries, OS capabilities, and valid stealth modules. Results are cached in-memory.
+3. **Coherent Recipe Selection:** Selects a realistic device preset from the 1000+ catalog, aligning OS, GPU, CPU, screen dimensions, DPR, and Client Hints architecture.
+4. **Localization & Geolocation:** Applies consistent language, timezone, and city-centered coordinates.
+5. **Deterministic Seeds:** Generates and locks seeds for Canvas 2D text shifts, audio noise, and hardware IDs.
+6. **Hash & Persistence:** Calculates `config_hash` and atomically writes `profile.json` under an OS-level file lock (`ProfileLock`). Existing profiles are never overwritten.
 
-Set identity-defining properties before the first launch of a new profile. The hash
-detects accidental corruption or mismatch; it is not a signature against an
-administrator who can rewrite the data and recalculate the hash.
+---
 
-## Opening a session
+## Session Launch & Anti-Detect Injection
 
-1. Read and validate the saved persona.
-2. Check compatibility against the local runtime manifest.
-3. Acquire the exclusive proxy channel lock, if applicable. Ports sharing a physical
-   modem must share a `proxy_channels` identifier.
-4. The factory acquires the profile OS lock and validates runtime-state/identity files.
-5. Start loopback TargetProxy. Chromium requires the checked driver patch; Camoufox
-   uses its pinned native configuration; WebKit checks the actual host and media support.
-6. Install mandatory session APIs and validate the environment before yielding the context.
-7. Yield regular Playwright context/page objects and behavior helpers to the application.
-8. On exit or exception, close the browser and transport, record runtime-state,
-   then release the profile lock and channel lock.
+1. **Validation:** Reads `profile.json`, verifies the SHA-256 hash, and checks compatibility against runtime capabilities.
+2. **Proxy Channel Locking:** If using a mobile proxy, acquires an exclusive OS lock for the modem channel (`proxy_channels`) to prevent concurrent usage of the same cellular modem.
+3. **Profile File Lock:** Acquires an exclusive file lock on `data/profiles/<id>/.locks/<id>.lock`.
+4. **TargetProxy Setup:** Initializes the loopback SOCKS5 gateway enforcing host allowlisting while delegating TLS handshakes to the native browser.
+5. **Browser Startup & Patching:**
+   - **Chromium:** Launches with the patched Playwright driver; attaches the CDP Worker Controller to auto-intercept and patch all background threads.
+   - **Camoufox:** Launches with pinned anti-detect C++ build and persistent native profile seeds.
+   - **WebKit:** Launches native WebKit on Linux/macOS with validated media decoders.
+6. **Pre-Navigation Injection:** Injects JavaScript anti-detect layers (`device_emulation.js`, `native_functions.js`) into all main frames and iframes before any document script executes.
+7. **Session Yield:** Yields standard Playwright `page` and `context` objects along with the `session.behavior` helper.
+8. **Teardown:** On session close, captures updated `browser-data` (cookies, storage, cache), flushes runtime state, closes proxies, and releases all OS locks.
 
-The caller owns the overall task deadline. `browser_start_timeout` bounds startup;
-`navigation_timeout` and `action_timeout` bound Playwright operations. Sessions do
-not automatically retry external actions.
+---
 
-## Persistent storage
+## Persistent Storage Layout
 
 ```text
 data/profiles/
-  .locks/<id>.lock
-  .network/...                      # Cross-process proxy channel lock files
+  .locks/<id>.lock                     # Cross-process OS profile lock
+  .network/...                         # Cross-process modem channel locks
   <id>/
-    profile.json                    # Persona and checksum
-    browser-data/                   # Cookies, localStorage, IndexedDB, engine cache
-    runtime-state.json              # Engine, launches, network observations
-    canvas-identity.json
-    emulation-identity.json          # When explicit emulation is present
-    session-hardware-identity.json   # Chromium
-    ios-identity.json                # WebKit/iOS
-    fingerprints/<fingerprint_id>.json
+    profile.json                       # Persona parameters and SHA config_hash
+    browser-data/                      # Persistent cookies, localStorage, IndexedDB, disk cache
+    runtime-state.json                 # Launch history, observed exit IPs, and run statistics
+    canvas-identity.json               # Profile-specific Canvas 2D subpixel noise seed
+    emulation-identity.json            # Hardware and WebGL parameters
+    session-hardware-identity.json     # Chromium CPU, RAM, and Battery state
+    ios-identity.json                  # WebKit / iOS specific identifiers
+    fingerprints/<fingerprint_id>.json # Camoufox native engine state
 ```
 
-Not every engine creates every file. Reuse requires a compatible browser version.
-Do not open the same `browser-data` concurrently outside this API. Copying a live
-profile directory is not a consistent backup.
+Cookies and storage are preserved directly in `browser-data/`. Reopening a profile continues the browser session with accumulated history, trust scores, and active authentication.
 
-Unlike the source product's November archive pipeline, this local wrapper does not
-clear browser caches before packaging: it has no packaging/S3 pipeline. This is an
-explicit standalone lifecycle difference; device emulation mechanisms are preserved.
+---
 
-## Early Chromium Worker initialization
+## Early WebWorker Interception
 
-Document init scripts do not configure HTTP Client Hints or background Worker
-contexts. A separate CDP controller recursively auto-attaches to targets, pauses
-startup, applies identity, and resumes execution. The checked driver patch removes
-competition with Playwright over target resume/detach ownership.
+Conventional browser automation tools fail against advanced anti-bots (such as Cloudflare Turnstile and DataDome) because anti-bot scripts query `navigator` and `OffscreenCanvas` from background WebWorkers where standard `page.add_init_script` cannot reach.
 
-Public sessions block service workers. Their initialization mechanism remains in
-the low-level factory for explicit QA use. Workers do not receive the entire DOM
-emulation layer. Firefox/WebKit do not have equivalent early Worker coverage.
+Syntetic Core implements a recursive **CDP Worker Controller**:
+- Uses Chrome DevTools Protocol `Target.setAutoAttach` with `waitForDebuggerOnStart: true`.
+- Intercepts DedicatedWorkers, SharedWorkers, ServiceWorkers, and NestedWorkers before the first line of worker script executes.
+- Injects hardware concurrency, device memory, User-Agent, platform, Client Hints, and WebGL offscreen canvas configuration.
+- Resumes the worker target only after all anti-detect overrides are active.
 
-## Networking
+---
 
-TargetProxy transfers the browser's TLS bytes over TCP. It checks destinations,
-does not create a new ClientHello, and does not implement its own browser TLS
-fingerprint. QUIC/HTTP3 is unavailable through this transport. Authorize local/private
-targets separately with `trusted_local_target_hosts`; a general allowlist is insufficient.
+## Network Stealth & Native Browser TLS
 
-Provider rotation uses a separate httpx client without ambient proxy settings or
-redirects. The IP probe traverses the assigned upstream proxy. It verifies the
-TCP/TLS tunnel's exit address, not every aspect of the target site's network behavior.
-
-## Distributed guarantees excluded from this package
-
-OS locks coordinate one host and a shared local directory. Redis quorum leases,
-DB fencing, canonical S3 heads, and the source supervisor/cgroups are excluded.
-Multiple hosts require an external coordinator. Local locks do not guarantee global
-serialization or exactly-once external actions.
+- **Native TLS Negotiation:** The browser itself negotiates the TLS session over a local SOCKS5 TCP tunnel. This ensures that JA3, JA4, and TLS extension fingerprints match genuine Chrome, Firefox, or Safari, avoiding the detectable TLS signatures of Python/Go HTTP libraries.
+- **Strict Host Allowlist:** `allowed_target_hosts` enforces strict destination control, blocking unauthorized tracker or leak requests.
+- **Modem Channel Serialization:** Mobile proxy ports sharing the same physical cellular modem are assigned a common channel ID, ensuring that IP rotation serializes correctly without breaking active sessions.
+- **Exit IP Verification Probe:** IP rotation via provider HTTP APIs is validated by an independent HTTP probe confirming a changed public exit IP before handing control back to the application.

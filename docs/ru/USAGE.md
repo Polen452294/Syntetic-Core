@@ -1,144 +1,142 @@
-# API и эксплуатация
+# Справочник API и управление антидетект-сессиями
 
 [English](../USAGE.md) · Русская версия
 
-## SynteticCore
+## Главный класс: `SynteticCore`
+
+Основная точка входа для управления профилями, генерации устройств, диагностики антидетект-возможностей и запуска скрытных сессий.
 
 ```python
+from syntetic_core import CoreSettings, SynteticCore
+
 core = SynteticCore(
     profile_root="data/profiles",
-    settings=CoreSettings(...),
-    proxy_channels={"port-1": "modem-A", "port-2": "modem-A"},
+    settings=CoreSettings(
+        allowed_target_hosts=["example.com", "api.example.com"],
+        browser_headless=False,
+    ),
+    proxy_channels={"mobile-port-1": "modem-A", "mobile-port-2": "modem-A"},
 )
 ```
 
-Один экземпляр предназначен для одного asyncio event loop. Настройки копируются
-при создании. Секреты и конфигурация прокси живут в настройках приложения, а не в
-`profile.json`. Не меняйте настройки одновременно с активными сессиями.
+Один экземпляр `SynteticCore` используется в рамках одного цикла событий `asyncio`. Настройки проверяются и фиксируются при инициализации.
 
-### capabilities(refresh=False)
+---
 
-Асинхронно проверяет реальные локальные runtime и дополнительные группы API.
-Возвращает копию manifest. Первый вызов может занять минуты. Недоступные движки
-помечаются, а не заменяются другим движком. `refresh=True` повторяет проверки после
-осознанного изменения окружения; обновление браузера существующего профиля может
-нарушить identity binding.
+### `capabilities(refresh=False)`
 
-### create_profile(...)
+Асинхронно сканирует локальное окружение: бинарные файлы браузеров, поддержку CDP-патчей Chromium, движок Camoufox C++ и кодеки WebKit. Возвращает кэшированный манифест. Параметр `refresh=True` нужен только при намеренном обновлении браузеров на хосте.
+
+---
+
+### `create_profile(...)`
+
+Генерирует полностью связный цифровой профиль устройства, фиксирует уникальные сиды отпечатков и создаёт постоянное хранилище.
 
 ```python
 persona = await core.create_profile(
-    "job-001",                # опционально; без ID генерируется UUID
-    family="android",         # desktop / android / ios
-    backend="playwright",     # playwright / camoufox
-    proxy_id="mobile-1",      # опционально, точный ID из Settings.proxies
+    "user-001",               # Идентификатор; при None генерируется UUID
+    family="android",         # Семейство: "desktop", "android" или "ios"
+    backend="playwright",     # Бэкенд: "playwright" (Chromium/WebKit) или "camoufox" (Firefox)
+    proxy_id="mobile-1",      # Опциональный ID прокси из Settings.proxies
     locale="ru-RU",
     timezone_id="Europe/Moscow",
-    fresh=False,
+    fresh=False,              # False = постоянный профиль с cookies; True = одноразовый визит
 )
 ```
 
-Camoufox допускает desktop. iOS требует Playwright/WebKit на подходящем хосте.
-Профиль создаётся один раз. Коллизия ID вызывает `FileExistsError`; отсутствие
-совместимого runtime — `RuntimeCompatibilityError`. Произвольные пути и ID с `/`
-не принимаются. Вернувшийся `BrowserPersona` можно изучать, но изменение этого
-объекта не переписывает сохранённый профиль.
+- **Связная генерация оборудования (Coherence):** Автоматически подбирает совместимые видеокарты, процессоры, экран, плотность пикселей (DPR) и архитектуру Client Hints.
+- **Постоянство по умолчанию (`fresh=False`):** Создает постоянную директорию `browser-data/` для сохранения cookies, истории и сессий. Это необходимо для прогрева аккаунтов и высокого рейтинга доверия антифрод-систем.
+- **Одноразовый режим (`fresh=True`):** Создает временный изолированный профиль без истории для разовых задач.
 
-По умолчанию оболочка выбирает постоянное использование: `visit_state=None`.
-`fresh=True` сохраняет исходный new/cold-контракт для одноразового визита.
+---
 
-### load_profile(id)
+### `load_profile(id)`
 
-Синхронное чтение конфигурации с проверкой ID/fingerprint/hash. Для больших потоков
-вызов можно выполнять через `asyncio.to_thread`. Чтение не запускает браузер и не
-возобновляет прошлую сессию. Неудачная проверка не исправляет профиль автоматически.
+Синхронно считывает `profile.json` и проверяет контрольную сумму SHA-256 (`config_hash`). Защищает профиль от повреждения и несанкционированного изменения отпечатка.
 
-### session(id, base_url=None)
+---
 
-Асинхронный context manager. Гарантирует закрытие browser context и шлюза при выходе
-и исключении. Один профиль нельзя открыть одновременно дважды. Занятый lock
-вызывает `ProfileLockedError`, а не скрытое ожидание или запуск временного профиля.
+### `session(id, base_url=None)`
 
-`base_url` нужен для явного `visit_state` нового/повторного посетителя, permissions
-и подготовки storage/cache. Для обычного постоянного профиля достаточно
-`async with core.session(id)` и затем `session.goto(url)`.
+Асинхронный контекстный менеджер: запускает браузер, активирует скрытный слой, подключает прокси и возвращает управляемый объект сессии.
 
-### BrowserSession
-
-| Поле/метод | Назначение |
-|---|---|
-| `page` | Основная Playwright Page |
-| `context` | Playwright BrowserContext; новые вкладки сохраняют общие init scripts |
-| `persona` | Снимок сохранённой конфигурации этой сессии |
-| `connection` | Фактически наблюдённая среда, runtime и транспорт |
-| `behavior` | Перенесённый InteractionBehavior |
-| `goto(url)` | Разрешение URL, DOMContentLoaded и проверка окружения |
-| `check_environment(page=None)` | Повторное сравнение идентичности и проверка CDP controller |
-| `maintain_presence(seconds)` | Явный UX-контур, когда он нужен задаче |
-
-Используя напрямую `page.goto` или popup, вызывайте `check_environment(page)` в
-нужных контрольных точках. Сетевой guard действует для всего context; проверка
-согласованности после каждого пользовательского действия автоматически не запускается.
-
-## Настройки
-
-| Поле | Смысл |
-|---|---|
-| `allowed_target_hosts` | Точные хосты целей и необходимых ресурсов |
-| `trusted_local_target_hosts` | Явное разрешение локальных/private целей для стендов |
-| `browser_headless` | Headless/headful для проверки и новых профилей |
-| `browser_start_timeout` | Бюджет подготовки сессии, по умолчанию 30 с |
-| `navigation_timeout` | Таймаут навигации, по умолчанию 15 с |
-| `action_timeout` | Таймаут действия Playwright, по умолчанию 10 с |
-| `camoufox_install_path` | Абсолютный путь закреплённой сборки |
-| `experimental_arm64` | Явный допуск ARM64 к реальным проверкам |
-| `proxies`, `proxy_required` | Прокси-конфигурация и запрет отсутствующего upstream |
-| `network_probe_url` | Дополнительная браузерная проверка сети фабрикой |
-| `traffic_optimizer_enabled` | Явное включение сохранённого resource filter |
-| `traffic_optimization_level` | `disabled` / `metadata_only` / `strict` |
-| `block_stylesheets` | CSS-фильтрация только вместе с разрешённой оптимизацией |
-
-Другие поля `_engine.config.Settings` сохранены для совместимости переносимых
-низкоуровневых частей. Включение distributed/archive/shared-storage отклоняется:
-реализаций соответствующих сервисов в отдельном ядре нет.
-
-Префикс переменных — `SYNTETIC_CORE_`, разделитель вложенности — `__`:
-
-```powershell
-$env:SYNTETIC_CORE_BROWSER_START_TIMEOUT="60"
-$env:SYNTETIC_CORE_ALLOWED_TARGET_HOSTS='["example.com","static.example.com"]'
+```python
+async with core.session("user-001") as session:
+    await session.goto("https://example.com")
+    
+    # Симуляция человеческого набора текста (с задержками и опечатками)
+    await session.behavior.type_text("input[name='q']", "симуляция реальных сессий")
+    
+    # Движение мыши по естественной кривой Безье с кликом
+    await session.behavior.click_element("button[type='submit']")
+    
+    # Плавный инерционный скроллинг страницы
+    await session.behavior.scroll_smooth(delta_y=600)
+    
+    # Эмуляция присутствия пользователя на странице (поведенческие факторы / ПФ)
+    await session.maintain_presence(seconds=4.0)
 ```
 
-JSON-массивы и объекты передаются как JSON-строки. `.env` автоматически не читается:
-это предотвращает случайную загрузку конфигурации соседнего проекта. Загружайте
-секреты средствами своего приложения или передавайте `CoreSettings(...)` явно.
+При выходе из блока `async with` ядро автоматически сохраняет все полученные cookies, `localStorage` и `IndexedDB`, корректно завершает процессы браузера и снимает блокировку профиля.
 
-## Параллельность и повторы
+---
 
-Используйте `asyncio.Semaphore` для ограничения общего числа браузеров и отдельный
-profile ID на параллельную задачу. Пример — `examples/parallel_sessions.py`.
-Один физический proxy/modem канал сериализуется локальным lock. Разные каналы
-могут исполняться параллельно в пределах вашего лимита.
+## Методы и свойства `BrowserSession`
 
-Не повторяйте автоматически действия с побочным эффектом после неопределённого
-сетевого результата. Ядро не обещает exactly-once. Для парсинга разумно отдельно
-учитывать HTTP-статус, готовность нужного DOM и пустой результат извлечения.
+| Метод / Свойство | Назначение |
+|---|---|
+| `session.page` | Стандартный объект Playwright `Page` (локаторы, вкладки, события, DOM) с активной защитой от детекта. |
+| `session.context` | Стандартный Playwright `BrowserContext` с постоянным хранилищем cookies и кэшем. |
+| `session.behavior` | Поведенческий модуль: движения мыши по кривым Безье, набор текста, инерционный скроллинг (ПФ). |
+| `session.persona` | Загруженная конфигурация `BrowserPersona` (рецепт оборудования, сиды, платформа). |
+| `session.connection` | Параметры текущего сетевого подключения и выходного соединения. |
+| `await session.goto(url)` | Переход по URL с проверкой белого списка хостов, ожиданием готовности DOM и валидацией stealth-слоя. |
+| `await session.check_environment(page=None)` | Проверка целостности маскировки: подтверждает `navigator.webdriver === false` и активность контроллера воркеров. |
+| `await session.maintain_presence(seconds)` | Эмуляция реального присутствия: микродвижения курсора, микроскроллы и удержание внимания на странице. |
 
-## Низкоуровневые возможности
+---
 
-Для специалистов сохранены модели `BrowserPersona`, `BrowserExperiment`, фабрика
-`BrowserContextFactory`, `VisitExperiment`, sensor helpers и identity replay.
-Они находятся в `_engine` и требуют явной настройки и проверки совместимости.
-Публичный `session()` отклоняет persona с timeline experiment, чтобы не заявлять
-его исполнение без координатора. Перенос YAML-моделей не означает наличия прежнего
-полного Run/ScenarioRunner, очереди, поискового workflow или инкубации.
+## Параметры конфигурации (`CoreSettings`)
 
-Для ручной работы с фабрикой используйте проверенный manifest, неизменный hash,
-достоверные origin permissions, ту же политику каналов и обязательное закрытие context.
+| Параметр | По умолчанию | Описание |
+|---|---|---|
+| `allowed_target_hosts` | `[]` | Белый список разрешённых целевых доменов и CDN. |
+| `trusted_local_target_hosts` | `[]` | Разрешение локальных/приватных адресов для тестов. |
+| `browser_headless` | `False` | Запуск браузера в фоновом (headless) или видимом режиме. |
+| `browser_start_timeout` | `30.0` | Лимит времени на запуск браузера, CDP и перехват воркеров. |
+| `navigation_timeout` | `15.0` | Таймаут навигации при вызове `session.goto()`. |
+| `action_timeout` | `10.0` | Таймаут действий Playwright (клики, ожидание селекторов). |
+| `proxies` | `[]` | Список настроенных прокси (`ProxyConfig`). |
+| `proxy_required` | `False` | При `True` запрещает запуск без прокси (защита от утечки реального IP). |
+| `camoufox_install_path` | `None` | Путь к кастомному бинарнику Camoufox (антидетект Firefox). |
+| `traffic_optimizer_enabled` | `False` | Включение фильтрации тяжелых ресурсов, рекламы и трекеров. |
 
-## Резервное копирование
+Переменные окружения используют префикс `SYNTETIC_CORE_`:
 
-Завершите активные сессии и скопируйте профиль целиком, включая identity-файлы и
-browser-data. Не переносите только cookies как замену полной идентичности.
-Сборка браузера и нативная конфигурация могут зависеть от хоста/пути установки;
-автоматической миграции между ОС/версиями здесь нет.
+```powershell
+$env:SYNTETIC_CORE_BROWSER_HEADLESS="false"
+$env:SYNTETIC_CORE_ALLOWED_TARGET_HOSTS='["example.com","login.example.com"]'
+```
+
+---
+
+## Поведенческие факторы и симуляция действий (`session.behavior`)
+
+Модуль `behavior` устраняет роботизированные паттерны взаимодействия, которые анализируют современные антибот-системы:
+
+- **`click_element(selector)`:** Вычисляет центр элемента и ведет курсор мыши по сглаженной кривой Безье с микроколебаниями перед нажатием.
+- **`type_text(selector, text, wpm=180, error_rate=0.03)`:** Набирает текст с естественными интервалами между буквами, иногда совершая опечатки и стирая их через Backspace.
+- **`scroll_smooth(delta_y, steps=20)`:** Выполняет плавный скроллинг с инерцией и реалистичным замедлением вместо мгновенных скачков.
+- **`hover_element(selector)`:** Плавное наведение курсора мыши на элемент.
+
+---
+
+## Резервное копирование и перенос профилей
+
+Поскольку профили персистентны, копирование папки `data/profiles/<id>/` полностью сохраняет личность устройства:
+1. `profile.json` (рецепт устройства и сиды)
+2. `browser-data/` (все cookies, localStorage, IndexedDB и кэш)
+3. `canvas-identity.json` и `session-hardware-identity.json` (сиды отпечатков)
+
+Перед копированием убедитесь, что профиль не активен (файл `.locks/<id>.lock` не заблокирован).

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "syntetic-core"
 version = "0.1.0"
-description = "Persistent device identities and native browser sessions for automation"
+description = "Anti-detect browser automation engine with fingerprint spoofing, persistent cookies, and human behavior emulation"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

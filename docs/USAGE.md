@@ -1,144 +1,142 @@
-# API and operation
+# API Reference & Anti-Detect Operation
 
 English · [Russian translation](ru/USAGE.md)
 
-## SynteticCore
+## Core Class: `SynteticCore`
+
+The main entry point manages profile storage, device generation, anti-detect capabilities discovery, and session execution.
 
 ```python
+from syntetic_core import CoreSettings, SynteticCore
+
 core = SynteticCore(
     profile_root="data/profiles",
-    settings=CoreSettings(...),
-    proxy_channels={"port-1": "modem-A", "port-2": "modem-A"},
+    settings=CoreSettings(
+        allowed_target_hosts=["example.com", "api.example.com"],
+        browser_headless=False,
+    ),
+    proxy_channels={"mobile-port-1": "modem-A", "mobile-port-2": "modem-A"},
 )
 ```
 
-Use one instance with one asyncio event loop. Settings are copied on construction.
-Proxy configuration and credentials belong in application settings, not `profile.json`.
-Do not mutate settings concurrently with active sessions.
+Use a single instance per `asyncio` event loop. Settings are validated and frozen at creation.
 
-### capabilities(refresh=False)
+---
 
-Asynchronously checks real local runtimes and optional API groups. Returns a copy
-of the manifest. Initial discovery may take minutes. Unavailable engines are marked
-as unavailable, not replaced with another engine. Use `refresh=True` after an
-intentional environment change; updating a browser may break an existing profile's
-identity binding.
+### `capabilities(refresh=False)`
 
-### create_profile(...)
+Asynchronously inspects local runtimes, browser binaries, and supported anti-detect features (Chromium CDP patching, Camoufox C++ engine, WebKit decoders). Returns a cached manifest. Use `refresh=True` only after changing local browser binaries.
+
+---
+
+### `create_profile(...)`
+
+Generates a fully coherent device identity, locks in fingerprint seeds, and creates the persistent profile folder.
 
 ```python
 persona = await core.create_profile(
-    "job-001",                # Optional; a UUID is generated if omitted.
-    family="android",         # desktop / android / ios
-    backend="playwright",     # playwright / camoufox
-    proxy_id="mobile-1",       # Optional exact ID from Settings.proxies.
-    locale="ru-RU",
-    timezone_id="Europe/Moscow",
-    fresh=False,
+    "user-001",               # Profile ID; generates a UUID if None
+    family="android",         # "desktop", "android", or "ios"
+    backend="playwright",     # "playwright" (Chromium/WebKit) or "camoufox" (Firefox)
+    proxy_id="mobile-1",      # Optional proxy identifier from Settings.proxies
+    locale="en-US",
+    timezone_id="America/New_York",
+    fresh=False,              # False = persistent (retains cookies/storage); True = virgin single-use
 )
 ```
 
-Camoufox supports desktop profiles. iOS requires Playwright/WebKit on an eligible
-host. A profile is created once. Duplicate IDs raise `FileExistsError`; a missing
-compatible runtime raises `RuntimeCompatibilityError`. Arbitrary paths and IDs
-containing `/` are rejected. The returned `BrowserPersona` can be inspected;
-mutating it does not overwrite the saved profile.
+- **Coherent Hardware Generation:** Automatically pairs compatible GPUs, CPUs, screen dimensions, DPR, and Client Hints architecture.
+- **Persistent by Default (`fresh=False`):** Creates persistent storage (`browser-data/`) to retain cookies, session state, and history across runs for account warming and high anti-fraud trust.
+- **Single-Use Mode (`fresh=True`):** Creates an ephemeral single-visit profile that rejects reuse after closing.
 
-The wrapper defaults to persistent use with `visit_state=None`. `fresh=True`
-retains the source new/cold contract for a single-use visit.
+---
 
-### load_profile(id)
+### `load_profile(id)`
 
-Synchronously reads configuration and validates the ID, fingerprint, and hash.
-For high-volume workflows, use `asyncio.to_thread`. Loading does not launch a
-browser or resume a previous session. Invalid profiles are not repaired automatically.
+Synchronously reads `profile.json` and verifies the SHA-256 `config_hash`. Validates that the device fingerprint has not been corrupted or tampered with.
 
-### session(id, base_url=None)
+---
 
-An async context manager that closes the browser context and gateway on normal
-exit or exception. One profile cannot be opened concurrently twice. A busy lock
-raises `ProfileLockedError`; the core does not silently wait or create a temporary profile.
+### `session(id, base_url=None)`
 
-`base_url` is required when explicit new/returning visitor conditions need
-permissions and storage/cache preparation. For a normal persistent profile,
-use `async with core.session(id)` followed by `session.goto(url)`.
+Asynchronous context manager that initializes the browser, injects stealth layers, handles proxy channels, and yields an active session.
 
-### BrowserSession
-
-| Field/method | Purpose |
-|---|---|
-| `page` | Main Playwright Page |
-| `context` | Playwright BrowserContext; new tabs inherit shared init scripts |
-| `persona` | Saved configuration snapshot for this session |
-| `connection` | Observed environment, runtime, and transport |
-| `behavior` | Extracted InteractionBehavior |
-| `goto(url)` | URL authorization, DOMContentLoaded, environment check |
-| `check_environment(page=None)` | Recheck identity and CDP controller health |
-| `maintain_presence(seconds)` | Explicit UX activity when the task needs it |
-
-When using `page.goto` directly or handling popups, call `check_environment(page)`
-at appropriate checkpoints. Network authorization applies to the entire context;
-consistency checks do not automatically follow every custom user action.
-
-## Settings
-
-| Field | Meaning |
-|---|---|
-| `allowed_target_hosts` | Exact target and resource hosts |
-| `trusted_local_target_hosts` | Explicit permission for local/private fixture hosts |
-| `browser_headless` | Headless/headful mode for discovery and new profiles |
-| `browser_start_timeout` | Session preparation budget; default 30 s |
-| `navigation_timeout` | Navigation timeout; default 15 s |
-| `action_timeout` | Playwright action timeout; default 10 s |
-| `camoufox_install_path` | Absolute path to the pinned build |
-| `experimental_arm64` | Explicit ARM64 opt-in for real runtime checks |
-| `proxies`, `proxy_required` | Proxy configuration and missing-upstream rejection |
-| `network_probe_url` | Additional browser network verification in the factory |
-| `traffic_optimizer_enabled` | Explicit resource-filter activation |
-| `traffic_optimization_level` | `disabled` / `metadata_only` / `strict` |
-| `block_stylesheets` | CSS filtering together with enabled optimization |
-
-Other `_engine.config.Settings` fields remain for compatibility with extracted
-low-level components. Distributed/archive/shared-storage modes are rejected because
-the corresponding services are not included in this standalone core.
-
-Environment variables use the `SYNTETIC_CORE_` prefix and `__` nesting separator:
-
-```powershell
-$env:SYNTETIC_CORE_BROWSER_START_TIMEOUT="60"
-$env:SYNTETIC_CORE_ALLOWED_TARGET_HOSTS='["example.com","static.example.com"]'
+```python
+async with core.session("user-001") as session:
+    await session.goto("https://example.com")
+    
+    # Human typing simulation (per-character delays & typos)
+    await session.behavior.type_text("input[name='q']", "anti-detect automation")
+    
+    # Human cursor movement along natural Bezier curves
+    await session.behavior.click_element("button[type='submit']")
+    
+    # Natural inertial scroll down the page
+    await session.behavior.scroll_smooth(delta_y=600)
+    
+    # Emulate human presence and dwell time (behavioral factors / ПФ)
+    await session.maintain_presence(seconds=4.0)
 ```
 
-Pass arrays and objects as JSON strings. `.env` is not read automatically, preventing
-accidental loading of a neighboring project's configuration. Load credentials through
-your application or pass `CoreSettings(...)` explicitly.
+Closing the context automatically flushes cookies, saves `localStorage` / `IndexedDB`, closes browser processes, and releases the OS file lock.
 
-## Concurrency and retries
+---
 
-Use `asyncio.Semaphore` to limit browser concurrency and a separate profile ID for
-each parallel task. See `examples/parallel_sessions.py`. A single physical proxy/modem
-channel is serialized by its local lock. Distinct channels can execute concurrently
-within the caller's overall limit.
+## `BrowserSession` Methods & Properties
 
-Do not automatically repeat side-effecting actions after an uncertain network result.
-The core does not guarantee exactly-once execution. For scraping, track HTTP status,
-required DOM readiness, and empty extraction results separately.
+| Attribute / Method | Description |
+|---|---|
+| `session.page` | Standard Playwright `Page` object (locators, tabs, downloads, DOM queries) with active anti-detect protections. |
+| `session.context` | Standard Playwright `BrowserContext` with persistent cookies and isolated storage. |
+| `session.behavior` | Built-in human behavioral simulator (Bezier mouse curves, human typing, inertial scrolling). |
+| `session.persona` | The loaded `BrowserPersona` containing the hardware recipe, seeds, and device identity. |
+| `session.connection` | Observed network transport and exit connection state. |
+| `await session.goto(url)` | Navigates to URL, enforces the host allowlist, waits for DOM readiness, and performs an automatic stealth sanity check. |
+| `await session.check_environment(page=None)` | Asserts that `navigator.webdriver === false`, CDP worker controllers are active, and no automation leaks have occurred. |
+| `await session.maintain_presence(seconds)` | Emulates human presence through micro-movements, slight scrolls, and realistic dwell time to build behavioral score. |
 
-## Low-level features
+---
 
-`BrowserPersona`, `BrowserExperiment`, `BrowserContextFactory`, `VisitExperiment`,
-sensor helpers, and identity replay remain available under `_engine`. They require
-explicit configuration and compatibility validation. Public `session()` rejects
-personas with timeline experiments rather than claiming execution without a
-coordinator. Extracted YAML models do not imply the old full Run/ScenarioRunner,
-queue, search workflow, or incubation pipeline is included.
+## Core Settings
 
-When using the factory directly, supply a verified manifest, stable hash, valid
-origin permissions, the same channel policy, and guaranteed context cleanup.
+| Setting | Default | Purpose |
+|---|---|---|
+| `allowed_target_hosts` | `[]` | Strict allowlist of target domains and third-party resource hosts. |
+| `trusted_local_target_hosts` | `[]` | Explicit authorization for localhost or private LAN endpoints. |
+| `browser_headless` | `False` | Run browser in headless or visible window mode. |
+| `browser_start_timeout` | `30.0` | Max seconds allotted for browser launch, CDP connection, and worker injection. |
+| `navigation_timeout` | `15.0` | Navigation timeout applied to `session.goto()`. |
+| `action_timeout` | `10.0` | Playwright locator and click action timeout. |
+| `proxies` | `[]` | List of `ProxyConfig` objects available for profile assignment. |
+| `proxy_required` | `False` | When `True`, prevents sessions from opening without a proxy (blocks direct connection leaks). |
+| `camoufox_install_path` | `None` | Path to the pinned Camoufox anti-detect Firefox binary. |
+| `traffic_optimizer_enabled` | `False` | Activates native resource filtering to block ads, trackers, or media. |
 
-## Backups
+Environment variables use the `SYNTETIC_CORE_` prefix with `__` for nested objects:
 
-Finish active sessions before copying an entire profile, including identity files
-and browser-data. Cookies alone are not a replacement for the full identity.
-Browser builds and native configuration may depend on the host/installation path;
-automatic migration across OSes or browser versions is not provided.
+```powershell
+$env:SYNTETIC_CORE_BROWSER_HEADLESS="false"
+$env:SYNTETIC_CORE_ALLOWED_TARGET_HOSTS='["example.com","auth.example.com"]'
+```
+
+---
+
+## Behavioral Factors & Interaction Helpers (`session.behavior`)
+
+The `behavior` helper simulates human interaction patterns (ПФ) that defeat anti-bot behavioral scoring:
+
+- **`click_element(selector)`:** Calculates target element center coordinates and moves the cursor along a randomized Bezier curve before clicking.
+- **`type_text(selector, text, wpm=180, error_rate=0.03)`:** Types text with natural inter-character delays, simulating occasional typos and backspace corrections.
+- **`scroll_smooth(delta_y, steps=20)`:** Executes a smooth inertial scroll with deceleration physics rather than instantaneous DOM jumps.
+- **`hover_element(selector)`:** Naturally sweeps the cursor across the viewport to hover over elements.
+
+---
+
+## Profile Backup & Portability
+
+Because profiles are persistent, copying the `data/profiles/<id>/` folder preserves the full identity, including:
+1. `profile.json` (device recipe and seeds)
+2. `browser-data/` (all cookies, local storage, indexedDB, and cache)
+3. `canvas-identity.json` & `session-hardware-identity.json` (deterministic fingerprint seeds)
+
+Ensure no active sessions are running (`.locks/<id>.lock` is unlocked) before copying or archiving profile directories.
