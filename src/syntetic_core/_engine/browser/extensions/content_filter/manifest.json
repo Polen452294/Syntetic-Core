@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "QA Offline Content Filter",
+  "version": "1.0.0",
+  "permissions": ["declarativeNetRequest"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "declarative_net_request": {
+    "rule_resources": [{"id": "qa", "enabled": true, "path": "rules.json"}]
+  }
+}

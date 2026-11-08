@@ -1,0 +1,8 @@
+include README.md NOTICE.md THIRD_PARTY.md VERIFICATION.md extraction-manifest.json requirements.lock
+include .env.example
+recursive-include docs *.md
+recursive-include examples *.py
+recursive-include tools *.py *.json
+recursive-include tests *.py
+recursive-include src *.js *.json *.mp4 *.c py.typed
+recursive-include skills *.md *.py *.yaml *.lock *.whl

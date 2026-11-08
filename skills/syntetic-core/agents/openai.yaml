@@ -1,0 +1,3 @@
+interface:
+  display_name: "Syntetic Core"
+  short_description: "Persistent browser profiles and device emulation"

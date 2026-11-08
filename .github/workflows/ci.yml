@@ -1,0 +1,23 @@
+name: Core regression
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -c requirements.lock -e '.[dev]'
+      - run: python -m ruff check src tests tools examples skills
+      - run: python -m ruff format --check src tests tools examples skills
+      - run: python -m mypy
+      - run: python -m pytest -m 'not browser' -q
+      - run: python -m playwright install --with-deps chromium
+      - run: python -c 'from syntetic_core.cli import install; install()'
+      - run: python -m pytest tests/test_browser.py -q
+        env:
+          SYNTETIC_CORE_RUN_BROWSER: '1'
+      - run: python -m build

@@ -1,0 +1,13 @@
+{
+  "source": "https://github.com/daijro/camoufox/releases/tag/v156.0.1-beta.35",
+  "version": "156.0.1",
+  "build": "beta.35",
+  "sha256": {
+    "lin.arm64": "6cb2bcd2ccd2d2e6eb3ce375e3f554c031eafa430944d55964703bc08e433a05",
+    "lin.x86_64": "9d4f6cd6682722a5cbb7af4d67bbc80781f75f31b37b96456a2503cdd05dfa24",
+    "mac.arm64": "b88b6091aeffade2a4e8a607999b268561337f867214148d5f33546ef04309c0",
+    "mac.x86_64": "22c86fe9ea8dd62d17542d9ad0643e0b6284ef3bc5bf0e5ca36044eb34c75140",
+    "win.i686": "8fc239be1521a32c08e99d68377185de64335078b993fd9e2cf964c1ee1e6691",
+    "win.x86_64": "27c4f8589a43284c3b85bf3502e1e51267dbb39737de3f82a8e9531e8cba5e14"
+  }
+}
