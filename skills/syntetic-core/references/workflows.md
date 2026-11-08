@@ -33,18 +33,20 @@ async def main():
         # goto() verifies network authorization, DOM readiness, and absence of CDP leaks
         response = await session.goto("https://example.com")
         if response is None or response.status >= 400:
-            raise RuntimeError(f"Navigation failed with status: {response.status if response else 'None'}")
+            raise RuntimeError(
+                f"Navigation failed with status: {response.status if response else 'None'}"
+            )
 
         # Human-like interaction via session.behavior (defeats behavioral analysis / ПФ)
         # 1. Natural mouse movement along a Bezier curve to focus input
         await session.behavior.click_element("input[name='search']")
-        
+
         # 2. Human typing with variable delays and simulated typo corrections
         await session.behavior.type_text("input[name='search']", "anti-detect automation")
-        
+
         # 3. Inertial scroll with reading dwell time
         await session.behavior.scroll_smooth(delta_y=400)
-        
+
         # 4. Emulate on-page presence
         await session.maintain_presence(seconds=3.0)
 
@@ -54,7 +56,9 @@ async def main():
         )
 
     # Persist extracted results (cookies and browser cache remain saved in profile storage)
-    Path("results.json").write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+    Path("results.json").write_text(
+        json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 asyncio.run(main())
